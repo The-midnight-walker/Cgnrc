@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0
-#
 # vim: set ts=8 sw=8 noet tw=80 cc=80 fo+=t :
 
 file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.c"
 )
 
-# executable name : kfgx
+
+# static library
+slib 
+#dynamique lib name
+set(dlib )
+
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
+
+add_library()
 
 target_compile_features(${PROJECT_NAME} PRIVATE
     c_std_11
