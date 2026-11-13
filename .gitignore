@@ -2,8 +2,10 @@
 # Out-of-tree build
 # =================
 /build/
+/install/
 /cmake-build-*/
 /out/
+/docs/
 
 # ===================================
 # Binaries, libraries and C artifacts
