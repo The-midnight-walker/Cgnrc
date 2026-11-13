@@ -20,7 +20,9 @@
 #define _GNU_SOURCE
 #endif
 
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @struct list_node
@@ -83,7 +85,19 @@ static inline void list_del(list_node_t *node)
  * @return Pointer to the enclosing container structure.
  */
 #define container_of(ptr, type, member)                                        \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
+    ((type *)(void *)((uintptr_t)(ptr) - offsetof(type, member)))
+
+/**
+ * @brief Casts a const member pointer back to its enclosing container structure.
+ *
+ * @param ptr    Pointer to the structure member.
+ * @param type   Data type of the container structure.
+ * @param member Name of the member field inside the container structure.
+ *
+ * @return Const pointer to the enclosing container structure.
+ */
+#define container_of_const(ptr, type, member)                                  \
+    ((const type *)(const void *)((uintptr_t)(ptr) - offsetof(type, member)))
 
 /**
  * @brief Iterates over an intrusive doubly linked list.

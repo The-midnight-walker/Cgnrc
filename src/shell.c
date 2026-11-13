@@ -20,6 +20,8 @@
 #endif
 
 #include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,13 +34,6 @@
 
 extern char **environ;
 
-#define pr_debug_env()                                                         \
-    do {                                                                       \
-        char **ep;                                                             \
-        for (ep = environ; *ep != NULL; ep++)                                  \
-            pr_debug("%s", *ep);                                               \
-    } while (0)
-
 /**
  * @brief Implementation of the shell script execution via fork and execve.
  *
@@ -48,89 +43,98 @@ extern char **environ;
  */
 static int execve_shell_script_impl(const char *pathname, char *const argv[])
 {
-    pid_t sh_pid;
-    int status, cur_pid, ret;
-
-    ret = -1;
-    switch ((sh_pid = fork())) {
-    case -1: /* Error on fork creation */
-        pr_error("fork process failed");
-        return ret;
-
-    case 0: /* Child process */
-        cur_pid = getpid();
-        pr_debug("[ %d ] on create child process", cur_pid);
-
-        /* print the environment variables for debugging */
-        /*pr_debug_env();*/
-
-        pr_debug("[ %d ] script path: %s", cur_pid, pathname);
-
-        pr_debug("[ %d ] execute the script by execve...", cur_pid);
-        errno = 0;
-
-        /* Execute the shell script */
-        execve(pathname, argv, environ);
-
-        /* If execve encounters an error */
-        pr_error("error encountered with errno = %d", errno);
-        pr_error("%s", strerror(errno));
-        pr_error("[ %d ] child process end execution abnormally", cur_pid);
-
-        /* CRITICAL: Use _exit instead of exit to avoid flushing parent buffers
-         */
-        _exit(-1);
-        break;
-
-    default: /* Parent or current process */
-        cur_pid = getpid();
-        pr_debug("[ %d ] child process created with success", cur_pid);
-        do {
-            if (waitpid(sh_pid, &status, WUNTRACED | WCONTINUED) == -1) {
-                pr_error("[ %d ] wait action for child failed", cur_pid);
-                if (ECHILD == errno)
-                    pr_debug("[ %d ] no children to wait for", cur_pid);
-                return ret;
-            }
-
-            if (WIFSTOPPED(status)) {
-                pr_debug(
-                    "[ %d ] child stopped by signal %d",
-                    cur_pid,
-                    WSTOPSIG(status));
-            }
-#ifdef WIFCONTINUED
-            if (WIFCONTINUED(status)) {
-                pr_debug(
-                    "[ %d ] child process continue on signal SIGCONT", cur_pid);
-            }
-#endif
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-
-        /* Analyze child process status */
-        if ((WIFEXITED(status))) {
-            ret = WEXITSTATUS(status);
-            pr_debug(
-                "[ %d ] child exited normally with status %d", cur_pid, ret);
-        }
-        if (WIFSIGNALED(status)) {
-#ifdef WCOREDUMP
-            if (WCOREDUMP(status)) {
-                pr_debug(
-                    "[ %d ] child exited on signal %d with core dump generated",
-                    cur_pid,
-                    WTERMSIG(status));
-            } else
-#endif
-            {
-                pr_debug(
-                    "[ %d ] child exited on signal %d",
-                    cur_pid,
-                    WTERMSIG(status));
-            }
-        }
-        break;
+    int error_pipe[2];
+    if (pipe(error_pipe) == -1) {
+        pr_error("failed to create exec status pipe");
+        return -1;
     }
+
+    int fd_flags = fcntl(error_pipe[1], F_GETFD);
+    if (fd_flags == -1 ||
+        fcntl(error_pipe[1], F_SETFD, fd_flags | FD_CLOEXEC) == -1) {
+        int saved_errno = errno;
+        close(error_pipe[0]);
+        close(error_pipe[1]);
+        errno = saved_errno;
+        pr_error("failed to configure exec status pipe");
+        return -1;
+    }
+
+    pid_t sh_pid = fork();
+    if (sh_pid == -1) {
+        int saved_errno = errno;
+        close(error_pipe[0]);
+        close(error_pipe[1]);
+        errno = saved_errno;
+        pr_error("fork process failed");
+        return -1;
+    }
+
+    if (sh_pid == 0) {
+        /* Only async-signal-safe operations are allowed between fork/exec. */
+        close(error_pipe[0]);
+        execve(pathname, argv, environ);
+        int exec_errno = errno;
+        const char *bytes = (const char *)&exec_errno;
+        size_t remaining = sizeof(exec_errno);
+        while (remaining > 0) {
+            ssize_t written = write(error_pipe[1], bytes, remaining);
+            if (written > 0) {
+                bytes += (size_t)written;
+                remaining -= (size_t)written;
+            } else if (written < 0 && errno == EINTR) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        _exit(127);
+    }
+
+    close(error_pipe[1]);
+
+    int exec_errno = 0;
+    size_t received = 0;
+    while (received < sizeof(exec_errno)) {
+        ssize_t count = read(
+            error_pipe[0], (char *)&exec_errno + received,
+            sizeof(exec_errno) - received);
+        if (count > 0) {
+            received += (size_t)count;
+        } else if (count == 0) {
+            break;
+        } else if (errno != EINTR) {
+            int saved_errno = errno;
+            close(error_pipe[0]);
+            pid_t waited;
+            do {
+                waited = waitpid(sh_pid, NULL, 0);
+            } while (waited == -1 && errno == EINTR);
+            errno = saved_errno;
+            pr_error("failed to read exec status");
+            return -1;
+        }
+    }
+    close(error_pipe[0]);
+
+    int status;
+    pid_t waited;
+    do {
+        waited = waitpid(sh_pid, &status, 0);
+    } while (waited == -1 && errno == EINTR);
+
+    if (waited == -1) {
+        pr_error("wait action for child failed");
+        return -1;
+    }
+    if (received > 0) {
+        errno = received == sizeof(exec_errno) ? exec_errno : EIO;
+        pr_error("execve failed: %s", strerror(errno));
+        return -1;
+    }
+
+    int ret = WIFEXITED(status) ? WEXITSTATUS(status)
+                                : 128 + WTERMSIG(status);
     pr_debug("execute shell script end; ret=%d", ret);
     return ret;
 }
@@ -147,12 +151,16 @@ int execve_shell_script(const char *pathname, char *const argv[])
     if (!pathname) {
         pr_error(
             "script to execute path hasn't been specified script_path=%p",
-            (void *)pathname);
+            (const void *)pathname);
+        return -1;
+    }
+    if (argv && !argv[0]) {
+        errno = EINVAL;
         return -1;
     }
 
     /* Fallback mechanism if argv is NULL to prevent execve crash */
-    char *default_argv[] = {(char *)pathname, NULL};
+    char *default_argv[] = {(char *)(uintptr_t)(const void *)pathname, NULL};
     char *const *effective_argv = argv ? argv : default_argv;
 
     if (!argv) {

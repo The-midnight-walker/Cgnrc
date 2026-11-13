@@ -17,6 +17,7 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #include "lists.h"
 
@@ -90,7 +91,8 @@ typedef struct module_struct {
  * @param[in] action  Execution handler callback. Mandatory and must not be
  * NULL.
  *
- * @return Pointer to the embedded public module structure, or NULL on failure.
+ * @return Pointer to the embedded public module structure, or NULL on
+ * invalid input or allocation failure.
  *
  * @note **CONCURRENCY && THREAD-SAFETY:**
  * Safe to call concurrently from multiple threads. Memory allocation and
@@ -114,12 +116,12 @@ module_t *register_module(
  * @param[in] action  Execution handler callback. Mandatory and must not be
  * NULL.
  *
- * @return Pointer to the embedded public module structure, or NULL on failure.
+ * @return Pointer to the embedded public module structure, or NULL on failure
+ * (including EBUSY when called during launch_cli()).
  *
  * @note **CONCURRENCY && THREAD-SAFETY:**
- * Fully protected under `module_ctx.mutex`. Concurrent calls are serialized
- * via a last-write-wins swap strategy. The new subtree is built off-lock
- * before atomically retiring and freeing the previous instance.
+ * Calls are serialized under the registry mutex. Replacing the root while
+ * launch_cli() is running is rejected to keep active module pointers valid.
  */
 module_t *set_root_module(
     const char *name,
@@ -175,7 +177,6 @@ int launch_cli(char *const *argv);
  * @brief Renders full, detailed usage instructions for a specific module.
  *
  * @param[in] stream   Target output file stream for rendering text.
- * @param[in] prog_name Executable program name or invocation path.
  * @param[in] m        Pointer to the target module structure.
  * @return Zero on success, or -1 if parameters are invalid.
  */
@@ -185,7 +186,6 @@ int pr_module_usage(FILE *stream, const module_t *m);
  * @brief Prints a concise, short summary usage line for a module.
  *
  * @param[in] stream   Target output file stream for rendering text.
- * @param[in] prog_name Executable program name or invocation path.
  * @param[in] m        Pointer to the target module structure.
  */
 void pr_module_short_usage(FILE *stream, const module_t *m);
@@ -216,8 +216,15 @@ int generate_sh_completion(const char *output_path);
 int generate_bash_completion(const char *output_path);
 
 /**
- * @brief Stores the executable name in the registry instance.
+ * @brief Stores the executable name pointer in the registry instance.
+ *
+ * The string is not copied and must remain valid while the registry may use it.
  */
 void module_set_prog_name(const char *prog_name);
+
+/**
+ * @brief Retrieves the executable name from the registry instance.
+ */
+const char *module_get_prog_name(void);
 
 #endif /* INCLUDE_MODULE_H */

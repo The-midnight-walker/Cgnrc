@@ -14,6 +14,8 @@
 #ifndef INCLUDE_SHELL_H
 #define INCLUDE_SHELL_H
 
+/* Returns the child's exit code, 128 + signal for signal termination, or -1
+ * if process creation, execve(), waiting, or status reporting fails. */
 int execve_shell_script(const char *pathname, char *const argv[]);
 
 #endif /* INCLUDE_SHELL_H */

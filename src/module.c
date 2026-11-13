@@ -12,14 +12,25 @@
  * @copyright GNU General Public License v2.0
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #define prfx_fmt "modules: "
 
 #include <ctype.h>
+#include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -59,6 +70,11 @@ typedef struct module_entry_struct {
  */
 #define to_module_entry(user_mod_ptr)                                          \
     container_of(user_mod_ptr, module_entry_t, mod)
+
+#define to_module_entry_const(user_mod_ptr)                                    \
+    container_of_const(user_mod_ptr, module_entry_t, mod)
+
+#define UNCONST(type, ptr) ((type)(uintptr_t)(const void *)(ptr))
 
 /**
  * @struct module_ctx_struct
@@ -172,16 +188,16 @@ static void free_module_public(module_t *mod)
             if (!opt)
                 continue;
 
-            free((char *)opt->l_opt);
-            free((char *)opt->arg_name);
-            free((char *)opt->desc);
+            free(UNCONST(void *, opt->l_opt));
+            free(UNCONST(void *, opt->arg_name));
+            free(UNCONST(void *, opt->desc));
             free(opt);
         }
         free(mod->options);
     }
 
     free(mod->name);
-    free((char *)mod->usage);
+    free(UNCONST(void *, mod->usage));
 
     memset(mod, 0, sizeof(*mod));
 }
@@ -206,6 +222,8 @@ static int dup_option(module_option_t **dst, const module_option_t *src)
     opt->l_opt = NULL;
     opt->arg_name = NULL;
     opt->desc = NULL;
+    opt->is_set = false;
+    opt->arg_val = NULL;
     *dst = opt;
 
     if (src->l_opt && !(opt->l_opt = strdup(src->l_opt)))
@@ -216,6 +234,46 @@ static int dup_option(module_option_t **dst, const module_option_t *src)
         return -1;
 
     return 0;
+}
+
+static bool option_definitions_are_valid(
+    const module_option_t options[], unsigned int opt_nr)
+{
+    if (opt_nr > (unsigned int)INT_MAX || (opt_nr > 0 && !options))
+        return false;
+
+#if SIZE_MAX <= UINT_MAX
+    if (opt_nr > (unsigned int)((SIZE_MAX - 3U) / 3U))
+        return false;
+#endif
+
+    for (unsigned int i = 0; i < opt_nr; i++) {
+        const module_option_t *option = &options[i];
+        if (option->has_arg != no_argument &&
+            option->has_arg != required_argument &&
+            option->has_arg != optional_argument)
+            return false;
+        if (!option->s_opt && !option->l_opt)
+            return false;
+        if (option->s_opt &&
+            ((unsigned char)option->s_opt < 33 ||
+             (unsigned char)option->s_opt > 126 || option->s_opt == ':' ||
+             option->s_opt == '?' || option->s_opt == '+' ||
+             option->s_opt == '-'))
+            return false;
+        if (option->l_opt &&
+            (option->l_opt[0] == '\0' || strchr(option->l_opt, '=')))
+            return false;
+
+        for (unsigned int j = 0; j < i; j++) {
+            if (option->s_opt && option->s_opt == options[j].s_opt)
+                return false;
+            if (option->l_opt && options[j].l_opt &&
+                strcmp(option->l_opt, options[j].l_opt) == 0)
+                return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -242,6 +300,10 @@ static int init_module_public(
     int (*action)(int optc, module_option_t **optv))
 {
     memset(mod, 0, sizeof(*mod));
+
+    if (!name || !action ||
+        !option_definitions_are_valid(options, opt_nr))
+        return -1;
 
     mod->name = strdup(name);
     if (!mod->name)
@@ -408,6 +470,12 @@ module_t *set_root_module(
 
     module_mutex_lock();
 
+    if (atomic_load(&module_ctx.cli_running)) {
+        module_mutex_unlock();
+        errno = EBUSY;
+        return NULL;
+    }
+
     module_entry_t *root = module_ctx.root_entry;
 
     if (!root) {
@@ -565,6 +633,32 @@ search_module_by_name(list_node_t *sub_modules_head, const char *name)
     return NULL;
 }
 
+static const module_entry_t *find_module_entry_by_public(
+    const list_node_t *modules, const module_t *public_module)
+{
+    const list_node_t *curr;
+    list_for_each(curr, modules)
+    {
+        const module_entry_t *entry =
+            container_of_const(curr, module_entry_t, siblings);
+        if (&entry->mod == public_module)
+            return entry;
+
+        const module_entry_t *nested =
+            find_module_entry_by_public(&entry->sub_modules, public_module);
+        if (nested)
+            return nested;
+    }
+    return NULL;
+}
+
+static const module_entry_t *find_registered_module(const module_t *module)
+{
+    if (module_ctx.root_entry && &module_ctx.root_entry->mod == module)
+        return module_ctx.root_entry;
+    return find_module_entry_by_public(&module_ctx.root_sub_modules, module);
+}
+
 /**
  * @brief Releases every module resource created for this CLI invocation.
  *
@@ -631,6 +725,12 @@ static int parse_cli_modules(char *const *argv)
 
             if (!current_mod) {
                 pr_error("No module active to handle option '%s'", arg);
+                goto out;
+            }
+
+            if (current_mod->args_nr >= (unsigned int)(INT_MAX - 1)) {
+                errno = E2BIG;
+                pr_error("Too many arguments for module '%s'", current_mod->mod.name);
                 goto out;
             }
 
@@ -708,7 +808,7 @@ static int parse_cli_modules(char *const *argv)
 
 out:
     if (ret != 0)
-        pr_error_to_user(
+        pr_error(
             "Failed to parse the command line arguments for modules");
     module_mutex_unlock();
     return ret;
@@ -783,12 +883,12 @@ static int parse_cli_modules_options(
                                        : NULL;
 
             if (optopt != 0) {
-                pr_error_to_user(
+                pr_error(
                     "Unrecognized option: '-%c'\n", printable(optopt));
             } else if (last_arg) {
-                pr_error_to_user("Unrecognized option: '%s'\n", last_arg);
+                pr_error("Unrecognized option: '%s'\n", last_arg);
             } else {
-                pr_error_to_user("Unrecognized option\n");
+                pr_error("Unrecognized option\n");
             }
             if (m->usage)
                 pr_module_usage(stderr, m);
@@ -797,7 +897,7 @@ static int parse_cli_modules_options(
         }
 
         if (opt == ':') {
-            pr_error_to_user(
+            pr_error(
                 "Option requires an argument: '-%c'\n", printable(optopt));
             if (m->usage)
                 pr_module_usage(stderr, m);
@@ -825,7 +925,7 @@ static int parse_cli_modules_options(
         }
 
         if (!matched) {
-            pr_error_to_user("unhandled option code: %d\n", opt);
+            pr_error("unhandled option code: %d\n", opt);
             pr_module_usage(stderr, m);
             ret = -1;
             goto out;
@@ -844,7 +944,7 @@ static int parse_cli_modules_options(
     }
 
     if (optind < parse_argc) {
-        pr_error_to_user(
+        pr_error(
             "Unexpected trailing argument or unknown subcommand: '%s'\n",
             parse_argv[optind]);
         if (m->usage)
@@ -913,9 +1013,18 @@ static int cli_parsing(void)
             continue;
         }
 
-        /* '+' + ':' + up to 3 chars per option + '\0' */
-        char optstring[m->opt_nr * 3 + 3];
-        struct option long_options[m->opt_nr + 1];
+        /* '+' + ':' + up to 3 chars per option + '\0'. */
+        size_t optstring_size = (size_t)m->opt_nr * 3 + 3;
+        char *optstring = malloc(optstring_size);
+        struct option *long_options =
+            calloc((size_t)m->opt_nr + 1, sizeof(*long_options));
+        if (!optstring || !long_options) {
+            free(optstring);
+            free(long_options);
+            pr_error("Failed to allocate option parsing tables");
+            ret = -1;
+            goto out;
+        }
         size_t optstr_idx = 0;
 
         /*
@@ -933,7 +1042,8 @@ static int cli_parsing(void)
         for (size_t i = 0; i < m->opt_nr; i++) {
             module_option_t *o = m->options[i];
 
-            long_options[i].name = o->l_opt;
+            /* getopt_long() uses a NULL name as the table terminator. */
+            long_options[i].name = o->l_opt ? o->l_opt : "";
             long_options[i].has_arg = o->has_arg;
             long_options[i].flag = NULL;
             /* Long-only options get a synthetic value above the char range. */
@@ -963,6 +1073,8 @@ static int cli_parsing(void)
 
         int parse_res = parse_cli_modules_options(
             (int)e->args_nr, e->args, optstring, long_options, m);
+        free(long_options);
+        free(optstring);
         if (parse_res < 0) {
             ret = -1;
             goto out;
@@ -1046,6 +1158,11 @@ out:
 
 int launch_cli(char *const *argv)
 {
+    if (!argv || !argv[0]) {
+        errno = EINVAL;
+        return -1;
+    }
+
     bool not_running = false;
     if (!atomic_compare_exchange_strong(
             &module_ctx.cli_running, &not_running, true)) {
@@ -1070,11 +1187,7 @@ int launch_cli(char *const *argv)
  */
 static void module_usage_impl(FILE *stream, const module_t *m)
 {
-    const char *progr_name = module_get_prog_name();
-    const char *name = strrchr(progr_name, '/');
-
-    name = name ? name + 1 : progr_name;
-
+    module_mutex_lock();
     pr_module_short_usage(stream, m);
 
     if (m->options && m->opt_nr > 0) {
@@ -1139,20 +1252,18 @@ static void module_usage_impl(FILE *stream, const module_t *m)
      * (cli_parsing() -> parse_cli_modules_options() -> pr_module_usage()),
      * since module_mutex_lock() is recursive.
      */
-    module_mutex_lock();
-
-    module_entry_t *entry = to_module_entry((module_t *)m);
-    list_node_t *sub_mods = (entry == module_ctx.root_entry)
+    const module_entry_t *entry = to_module_entry_const(m);
+    const list_node_t *sub_mods = (entry == module_ctx.root_entry)
                                 ? &module_ctx.root_sub_modules
                                 : (entry ? &entry->sub_modules : NULL);
 
     if (sub_mods && !list_empty(sub_mods)) {
         fprintf(stream, "Available commands:\n");
-        list_node_t *curr;
+        const list_node_t *curr;
         list_for_each(curr, sub_mods)
         {
-            module_entry_t *child =
-                container_of(curr, module_entry_t, siblings);
+            const module_entry_t *child =
+                container_of_const(curr, module_entry_t, siblings);
             char cmd_buf[32];
             snprintf(
                 cmd_buf,
@@ -1179,7 +1290,13 @@ int pr_module_usage(FILE *stream, const module_t *m)
     if (!stream)
         stream = stderr;
 
+    module_mutex_lock();
+    if (!find_registered_module(m)) {
+        module_mutex_unlock();
+        return -1;
+    }
     module_usage_impl(stream, m);
+    module_mutex_unlock();
     return 0;
 }
 
@@ -1197,7 +1314,11 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
 
     module_mutex_lock();
 
-    const module_entry_t *entry = to_module_entry((module_t *)m);
+    const module_entry_t *entry = find_registered_module(m);
+    if (!entry) {
+        module_mutex_unlock();
+        return;
+    }
 
     size_t depth = 0;
     const module_entry_t *curr = entry;
@@ -1206,7 +1327,15 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
         curr = curr->parent;
     }
 
-    const module_t *chain[depth];
+#define PR_USAGE_STACK_BUF 32
+    const module_t *stack_chain[PR_USAGE_STACK_BUF];
+    const module_t **chain = (depth <= PR_USAGE_STACK_BUF)
+                                 ? stack_chain
+                                 : malloc(depth * sizeof(const module_t *));
+    if (!chain) {
+        module_mutex_unlock();
+        return;
+    }
     size_t idx = depth;
     curr = entry;
     while (curr) {
@@ -1234,6 +1363,10 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
     PRINT_USAGE(" %s\n", m->usage ? m->usage : "[OPTIONS]");
 
 #undef PRINT_USAGE
+#undef PR_USAGE_STACK_BUF
+
+    if (chain != stack_chain)
+        free(chain);
 
     module_mutex_unlock();
 }
@@ -1299,15 +1432,97 @@ write_completion_tree(FILE *out, const char *parent_path, list_node_t *modules)
     }
 }
 
+/** Returns whether a token is safe in the generated space-separated list. */
+static bool completion_word_is_safe(const char *word)
+{
+    if (!word || !word[0] || word[0] == '-')
+        return false;
+
+    for (const unsigned char *ch = (const unsigned char *)word; *ch; ch++) {
+        if (!((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z') ||
+              (*ch >= '0' && *ch <= '9') || *ch == '_' || *ch == '-'))
+            return false;
+    }
+    return true;
+}
+
+static bool completion_options_are_safe(const module_t *mod)
+{
+    if (!mod)
+        return true;
+
+    for (unsigned int i = 0; i < mod->opt_nr; i++) {
+        if (mod->options[i]->l_opt &&
+            !completion_word_is_safe(mod->options[i]->l_opt))
+            return false;
+    }
+    return true;
+}
+
+static bool completion_tree_is_safe(const list_node_t *modules)
+{
+    const list_node_t *curr;
+    list_for_each(curr, modules)
+    {
+        const module_entry_t *entry =
+            container_of_const(curr, module_entry_t, siblings);
+        if (!completion_word_is_safe(entry->mod.name) ||
+            !completion_options_are_safe(&entry->mod) ||
+            !completion_tree_is_safe(&entry->sub_modules))
+            return false;
+    }
+    return true;
+}
+
+/** Writes a shell single-quoted assignment without interpreting its value. */
+static void write_shell_assignment(FILE *out, const char *name, const char *value)
+{
+    fprintf(out, "%s='", name);
+    for (const char *ch = value; *ch; ch++) {
+        if (*ch == '\'')
+            fputs("'\\''", out);
+        else
+            fputc(*ch, out);
+    }
+    fputs("'\n", out);
+}
+
+/** Converts argv[0]'s basename into a valid, bounded shell function suffix. */
+static void shell_function_base(const char *program, char *out, size_t out_size)
+{
+    const char *base = strrchr(program, '/');
+    base = base ? base + 1 : program;
+    if (!*base)
+        base = "program";
+
+    size_t index = 0;
+    if (!((*base >= 'a' && *base <= 'z') || (*base >= 'A' && *base <= 'Z') ||
+          *base == '_')) {
+        if (index + 1 < out_size)
+            out[index++] = '_';
+    }
+    while (*base && index + 1 < out_size) {
+        unsigned char ch = (unsigned char)*base++;
+        out[index++] = ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= '0' && ch <= '9') || ch == '_')
+                           ? (char)ch
+                           : '_';
+    }
+    if (index == 0 && out_size > 1)
+        out[index++] = '_';
+    out[index] = '\0';
+}
+
 /**
  * @brief Writes everything before the `case "$path" in` line of the
  * POSIX sh completion script: shebang, header comment, and the lookup
  * function's word-parsing prologue.
  */
 static void
-write_sh_header(FILE *out, const char *base, const char *output_path)
+write_sh_header(FILE *out, const char *base, const char *command_name)
 {
     fprintf(out, "#!/bin/sh\n");
+    write_shell_assignment(out, "program_name", command_name);
     fprintf(out, "# Auto-generated by %s - do not edit by hand.\n", base);
     fprintf(out, "#\n");
     fprintf(
@@ -1315,7 +1530,7 @@ write_sh_header(FILE *out, const char *base, const char *output_path)
     fprintf(out, "# typed after the program name,  the last one being the\n");
     fprintf(out, "# (possibly partial) word under the cursor, it prints the\n");
     fprintf(out, "# matching candidates, one per line. Try it directly:\n");
-    fprintf(out, "#   . %s && _%s_complete net \"\"\n", output_path, base);
+    fprintf(out, "#   . <completion-file> && _%s_complete net \"\"\n", base);
     fprintf(out, "\n_%s_complete() {\n", base);
     fprintf(out, "    cur=\"\"\n");
     fprintf(out, "    path=\"\"\n");
@@ -1362,8 +1577,8 @@ static void write_sh_footer(FILE *out, const char *base)
     fprintf(out, "$(_%s_complete \"${COMP_WORDS[@]:1:COMP_CWORD}\")\n", base);
     fprintf(out, "EOF\n");
     fprintf(out, "}\n");
-    fprintf(out, "complete -F _%s_bash_complete %s\n", base, base);
     fprintf(out, "'\n");
+    fprintf(out, "complete -F _%s_bash_complete \"$program_name\"\n", base);
     fprintf(out, "fi\n");
 }
 
@@ -1373,12 +1588,13 @@ static void write_sh_footer(FILE *out, const char *base)
  * function's prologue (reads COMP_WORDS/COMP_CWORD directly).
  */
 static void
-write_bash_header(FILE *out, const char *base, const char *output_path)
+write_bash_header(FILE *out, const char *base, const char *command_name)
 {
     fprintf(out, "#!/usr/bin/env bash\n");
+    write_shell_assignment(out, "program_name", command_name);
     fprintf(out, "# Auto-generated by %s - do not edit by hand.\n", base);
     fprintf(out, "# Bash completion for %s.\n", base);
-    fprintf(out, "#   . %s\n", output_path);
+    fprintf(out, "#   source <completion-file>\n");
     fprintf(out, "\n_%s_complete() {\n", base);
     fprintf(out, "    local cur path i\n");
     fprintf(out, "    cur=${COMP_WORDS[COMP_CWORD]}\n");
@@ -1404,7 +1620,7 @@ static void write_bash_footer(FILE *out, const char *base)
     fprintf(out, "    esac\n\n");
     fprintf(out, "    COMPREPLY=($(compgen -W \"$candidates\" -- \"$cur\"))\n");
     fprintf(out, "}\n\n");
-    fprintf(out, "complete -F _%s_complete %s\n", base, base);
+    fprintf(out, "complete -F _%s_complete \"$program_name\"\n", base);
 }
 
 /**
@@ -1417,7 +1633,7 @@ static void write_bash_footer(FILE *out, const char *base)
  */
 static int write_completion_script(
     const char *output_path,
-    void (*write_header)(FILE *out, const char *base, const char *output_path),
+    void (*write_header)(FILE *out, const char *base, const char *command_name),
     void (*write_footer)(FILE *out, const char *base))
 {
     if (!output_path)
@@ -1427,18 +1643,31 @@ static int write_completion_script(
     if (!prog_name)
         return -1;
 
+    const char *command_name = strrchr(prog_name, '/');
+    command_name = command_name ? command_name + 1 : prog_name;
+    char base[128];
+    shell_function_base(command_name, base, sizeof(base));
+
+    module_mutex_lock();
+
+    if (!completion_options_are_safe(
+            module_ctx.root_entry ? &module_ctx.root_entry->mod : NULL) ||
+        !completion_tree_is_safe(&module_ctx.root_sub_modules)) {
+        module_mutex_unlock();
+        errno = EINVAL;
+        return -1;
+    }
+
     FILE *out = fopen(output_path, "w");
     if (!out) {
+        int saved_errno = errno;
+        module_mutex_unlock();
+        errno = saved_errno;
         pr_error("Failed to open '%s' for writing", output_path);
         return -1;
     }
 
-    const char *base = strrchr(prog_name, '/');
-    base = base ? base + 1 : prog_name;
-
-    module_mutex_lock();
-
-    write_header(out, base, output_path);
+    write_header(out, base, command_name);
 
     write_completion_arm(
         out,
@@ -1449,9 +1678,16 @@ static int write_completion_script(
 
     write_footer(out, base);
 
+    int write_failed = ferror(out);
     module_mutex_unlock();
 
-    fclose(out);
+    if (fclose(out) != 0)
+        write_failed = 1;
+    if (write_failed) {
+        if (errno == 0)
+            errno = EIO;
+        return -1;
+    }
     pr_info("Generated completion script at '%s'", output_path);
     return 0;
 }

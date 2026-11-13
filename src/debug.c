@@ -97,7 +97,11 @@ static bool write_all(int fd, const char *buf, size_t count)
         total_written += (size_t)written;
     }
 
-    fsync(fd);
+    while (fsync(fd) < 0) {
+        if (errno == EINTR)
+            continue;
+        return false;
+    }
 
     return true;
 }
@@ -240,8 +244,12 @@ int log_write(const char *fmt, ...)
         return LOG_ESYS;
     }
 
-    if (msg_len > 0 && msg_buf[msg_len - 1] == '\n') {
-        msg_buf[msg_len - 1] = '\0';
+    size_t stored_len = (size_t)msg_len;
+    if (stored_len >= sizeof(msg_buf))
+        stored_len = sizeof(msg_buf) - 1;
+
+    if (stored_len > 0 && msg_buf[stored_len - 1] == '\n') {
+        msg_buf[stored_len - 1] = '\0';
     }
 
     /* Assemble the final line */
@@ -304,9 +312,11 @@ int print_colored_log(const char *filepath)
         const char *color = RESET;
         FILE *target_stream = stdout;
 
-        /* Find the log level this line belongs to */
+        /* The logger writes a fixed `[ LEVEL ]` prefix; ignore message text. */
         for (size_t i = 0; i < LOG_LEVELS_NR; i++) {
-            if (strstr(line, LOG_LEVELS[i].status)) {
+            if (nread >= 9 && strncmp(line, "[ ", 2) == 0 &&
+                strncmp(line + 2, LOG_LEVELS[i].status, 5) == 0 &&
+                strncmp(line + 7, " ]", 2) == 0) {
                 color = LOG_LEVELS[i].tty_color;
                 target_stream = (LOG_LEVELS[i].stream_type == STREAM_STDERR)
                                     ? stderr
@@ -331,7 +341,9 @@ int print_colored_log(const char *filepath)
 #endif
     }
 
+    int ret = ferror(fp) ? -1 : 0;
     free(line);
-    fclose(fp);
-    return 0;
+    if (fclose(fp) != 0)
+        ret = -1;
+    return ret;
 }

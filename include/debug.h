@@ -200,32 +200,29 @@ extern const struct log_level LOG_LEVELS[IDX_COUNT];
 
 /**
  * @brief Prints a printf-style message wrapped in an ANSI color.
- *
- * @param stream Destination FILE stream.
- * @param color  ANSI color literal (e.g. RED).
- * @param fmt    printf format string literal.
  */
-#define PR_COLOR(stream, color, fmt, ...)                                      \
-    fprintf((stream), color fmt RESET, ##__VA_ARGS__)
+#define PR_COLOR(stream, color, ...)                                           \
+    do {                                                                       \
+        fprintf((stream), "%s", (color));                                      \
+        fprintf((stream), __VA_ARGS__);                                        \
+        fprintf((stream), "%s", RESET);                                        \
+    } while (0)
 
 /**
- * @brief Plain fprintf() wrapper, kept for symmetry with the pr_<color>()
- * helpers.
+ * @brief Plain fprintf() wrapper.
  */
-#define pr(stream, fmt, ...) fprintf((stream), fmt, ##__VA_ARGS__)
+#define pr(stream, ...) fprintf((stream), __VA_ARGS__)
 
 /**
  * @name Colored print helpers
- * @brief Same signature as fprintf(): (stream, fmt, ...).
  * @{
  */
-#define pr_cyan(stream, fmt, ...) PR_COLOR(stream, CYAN, fmt, ##__VA_ARGS__)
-#define pr_red(stream, fmt, ...) PR_COLOR(stream, RED, fmt, ##__VA_ARGS__)
-#define pr_green(stream, fmt, ...) PR_COLOR(stream, GREEN, fmt, ##__VA_ARGS__)
-#define pr_yellow(stream, fmt, ...) PR_COLOR(stream, YELLOW, fmt, ##__VA_ARGS__)
-#define pr_blue(stream, fmt, ...) PR_COLOR(stream, BLUE, fmt, ##__VA_ARGS__)
-#define pr_magenta(stream, fmt, ...)                                           \
-    PR_COLOR(stream, MAGENTA, fmt, ##__VA_ARGS__)
+#define pr_cyan(stream, ...) PR_COLOR(stream, CYAN, __VA_ARGS__)
+#define pr_red(stream, ...) PR_COLOR(stream, RED, __VA_ARGS__)
+#define pr_green(stream, ...) PR_COLOR(stream, GREEN, __VA_ARGS__)
+#define pr_yellow(stream, ...) PR_COLOR(stream, YELLOW, __VA_ARGS__)
+#define pr_blue(stream, ...) PR_COLOR(stream, BLUE, __VA_ARGS__)
+#define pr_magenta(stream, ...) PR_COLOR(stream, MAGENTA, __VA_ARGS__)
 /** @} */
 
 /**
@@ -341,13 +338,6 @@ int print_colored_log(const char *filepath);
 
 /**
  * @name Debug-mode configuration
- * @brief Selects what the console macros print, based on the project-wide
- * DEBUG macro (the same one modules.c already checks for its own extra
- * diagnostics).
- *
- * Define DEBUG (-DDEBUG) to enable DEBUG-level console output and the
- * [ func:file:line ] suffix on every console line. Without it, pr_debug()
- * is compiled out at the console (see LOG_CLI()) and the suffix is omitted.
  * @{
  */
 #ifdef DEBUG
@@ -369,61 +359,37 @@ int print_colored_log(const char *filepath);
 
 /**
  * @brief Writes a formatted log line to the console (stdout or stderr).
- *
- * Output layout: `[ LEVEL ] <prfx_fmt><message>`, followed by
- * ` [ func:file:line ]` when DEBUG is defined.
- *
- * When LOG_TTY_COLOR is defined, the log line is colorized using the ANSI
- * escape sequence associated with the log level (via the LOG_LEVELS table)
- * and a reset code is appended at the end. When LOG_TTY_COLOR is not
- * defined, plain text is written without any color codes.
- *
- * DEBUG-level messages are dropped entirely unless DEBUG is defined; their
- * arguments are still compiled (and their format checked) but never
- * evaluated at run time.
- *
- * The level name and color come from the LOG_LEVELS table and are passed as
- * "%s" arguments, since they are runtime values and cannot be spliced into
- * the format string literal.
- *
- * @param level_index Constant from enum log_level_index.
- * @param fmt         printf format string literal.
- *
- * @note level_index is evaluated several times; pass a constant.
  */
 #ifdef LOG_TTY_COLOR
 
-#define LOG_CLI(level_index, fmt, ...)                                         \
+#define LOG_CLI(level_index, ...)                                              \
     do {                                                                       \
-                                                                               \
         FILE *log_cli_stream =                                                 \
             (LOG_LEVELS[level_index].stream_type == STREAM_STDERR) ? stderr    \
                                                                    : stdout;   \
-                                                                               \
         fprintf(                                                               \
             log_cli_stream,                                                    \
-            "%s[ %s ] " RESET COLOR_PRFX_FMT prfx_fmt RESET fmt                \
-                LOG_META_FMT_COLOR,                                            \
+            "%s[ %s ] " RESET COLOR_PRFX_FMT prfx_fmt RESET,                  \
             LOG_LEVELS[level_index].tty_color,                                 \
-            LOG_LEVELS[level_index].status,                                    \
-            ##__VA_ARGS__ LOG_META_ARGS);                                      \
+            LOG_LEVELS[level_index].status);                                   \
+        fprintf(log_cli_stream, __VA_ARGS__);                                  \
+        fprintf(log_cli_stream, LOG_META_FMT_COLOR LOG_META_ARGS);             \
         fflush(log_cli_stream);                                                \
     } while (0)
 
 #else
 
-#define LOG_CLI(level_index, fmt, ...)                                         \
+#define LOG_CLI(level_index, ...)                                              \
     do {                                                                       \
-                                                                               \
         FILE *log_cli_stream =                                                 \
             (LOG_LEVELS[level_index].stream_type == STREAM_STDERR) ? stderr    \
                                                                    : stdout;   \
-                                                                               \
         fprintf(                                                               \
             log_cli_stream,                                                    \
-            "[ %s ] " prfx_fmt fmt LOG_META_FMT,                               \
-            LOG_LEVELS[level_index].status,                                    \
-            ##__VA_ARGS__ LOG_META_ARGS);                                      \
+            "[ %s ] " prfx_fmt,                                                \
+            LOG_LEVELS[level_index].status);                                   \
+        fprintf(log_cli_stream, __VA_ARGS__);                                  \
+        fprintf(log_cli_stream, LOG_META_FMT LOG_META_ARGS);                   \
         fflush(log_cli_stream);                                                \
     } while (0)
 
@@ -431,37 +397,36 @@ int print_colored_log(const char *filepath);
 
 /**
  * @brief Writes a formatted log line to the persistent log file.
- *
- * Output layout: `[ LEVEL ] <prfx_fmt><message>`, followed by
- * ` [ func:file:line ]` when DEBUG is defined.
- * DEBUG-level messages are dropped entirely unless DEBUG is defined.
- *
- * @param level_index Constant from enum log_level_index.
- * @param fmt         printf format string literal.
  */
-#define LOG_FILE(level_index, fmt, ...)                                        \
+#define LOG_FILE(level_index, ...)                                             \
     do {                                                                       \
-                                                                               \
+        char _log_file_msg[LOG_MSG_BUF_SIZE];                                  \
+        int _msg_w = snprintf(_log_file_msg, sizeof(_log_file_msg), __VA_ARGS__); \
+        if (_msg_w > 0 && (size_t)_msg_w < sizeof(_log_file_msg) &&             \
+            _log_file_msg[_msg_w - 1] == '\n')                                 \
+            _log_file_msg[_msg_w - 1] = '\0';                                  \
         log_write(                                                             \
-            "[ %s ] " prfx_fmt fmt LOG_META_FMT,                               \
+            "[ %s ] " prfx_fmt "%s" LOG_META_FMT,                              \
             LOG_LEVELS[level_index].status,                                    \
-            ##__VA_ARGS__ LOG_META_ARGS);                                      \
-                                                                               \
+            _log_file_msg LOG_META_ARGS);                                      \
     } while (0)
 
 /**
  * @brief Runtime-filtered core of the pr_*() macros.
- *
- * @param idx Constant from enum log_level_index.
- * @param bit Matching LOG_LEVEL_* bitmask value.
- * @param fmt printf format string literal.
  */
-#define PR_LEVEL(idx, bit, fmt, ...)                                           \
+#define PR_LEVEL(idx, bit, ...)                                                \
     do {                                                                       \
-        if (get_cli_log_mask() & (bit))                                        \
-            LOG_CLI(idx, fmt, ##__VA_ARGS__);                                  \
-        if (get_file_log_mask() & (bit))                                       \
-            LOG_FILE(idx, fmt, ##__VA_ARGS__);                                 \
+        unsigned int _pr_cli_mask = get_cli_log_mask();                        \
+        unsigned int _pr_file_mask = get_file_log_mask();                      \
+        if ((_pr_cli_mask | _pr_file_mask) & (bit)) {                          \
+            char _pr_message[LOG_MSG_BUF_SIZE];                                \
+            (void)snprintf(                                                    \
+                _pr_message, sizeof(_pr_message), __VA_ARGS__);                \
+            if (_pr_cli_mask & (bit))                                          \
+                LOG_CLI(idx, "%s", _pr_message);                              \
+            if (_pr_file_mask & (bit))                                         \
+                LOG_FILE(idx, "%s", _pr_message);                             \
+        }                                                                      \
     } while (0)
 
 /**
@@ -469,14 +434,11 @@ int print_colored_log(const char *filepath);
  * @brief Log at the given level, to both the console and the log file.
  * @{
  */
-#define pr_fatal(fmt, ...)                                                     \
-    PR_LEVEL(IDX_FATAL, LOG_LEVEL_FATAL, fmt, ##__VA_ARGS__)
-#define pr_warn(fmt, ...) PR_LEVEL(IDX_WARN, LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define pr_error(fmt, ...)                                                     \
-    PR_LEVEL(IDX_ERROR, LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define pr_info(fmt, ...) PR_LEVEL(IDX_INFO, LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define pr_debug(fmt, ...)                                                     \
-    PR_LEVEL(IDX_DEBUG, LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define pr_fatal(...) PR_LEVEL(IDX_FATAL, LOG_LEVEL_FATAL, __VA_ARGS__)
+#define pr_warn(...)  PR_LEVEL(IDX_WARN, LOG_LEVEL_WARN, __VA_ARGS__)
+#define pr_error(...) PR_LEVEL(IDX_ERROR, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define pr_info(...)  PR_LEVEL(IDX_INFO, LOG_LEVEL_INFO, __VA_ARGS__)
+#define pr_debug(...) PR_LEVEL(IDX_DEBUG, LOG_LEVEL_DEBUG, __VA_ARGS__)
 /** @} */
 
 #endif /* INCLUDE_DEBUG_H */
