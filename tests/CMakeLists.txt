@@ -2,23 +2,49 @@
 #
 # vim: set ts=8 sw=8 noet tw=80 cc=80 fo+=t :
 
-add_executable(test01
-    test01.c
-    ${CMAKE_SOURCE_DIR}/src/cli/parser.c
-    ${CMAKE_SOURCE_DIR}/src/cli/shell_completions.c
-    ${CMAKE_SOURCE_DIR}/src/handlers/handle.c
-    ${CMAKE_SOURCE_DIR}/src/handlers/default_handle.c
-    ${CMAKE_SOURCE_DIR}/src/debug.c
-)
+if(BUILD_TESTING)
+    function(add_cgnrc_test name)
+        if(BUILD_LIB_A)
+            add_executable(${name} ${name}.c)
+            target_link_libraries(${name} PRIVATE cgnrc_static)
+        elseif(BUILD_LIB_SO)
+            add_executable(${name} ${name}.c)
+            target_link_libraries(${name} PRIVATE cgnrc_shared)
+        else()
+            add_executable(${name}
+                ${name}.c
+                ${CMAKE_SOURCE_DIR}/src/debug.c
+                ${CMAKE_SOURCE_DIR}/src/module.c
+                ${CMAKE_SOURCE_DIR}/src/shell.c
+            )
+        endif()
 
-target_include_directories(test01 PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/cli
-    ${CMAKE_SOURCE_DIR}/include/handlers
-)
+        target_include_directories(${name} PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+        )
 
-target_compile_features(test01 PRIVATE c_std_11)
-target_compile_definitions(test01 PRIVATE _POSIX_C_SOURCE=200809L DEBUG)
-target_compile_options(test01 PRIVATE -Wall -Wextra -Werror)
+        target_compile_features(${name} PRIVATE c_std_11)
+        target_compile_definitions(${name} PRIVATE _POSIX_C_SOURCE=200809L DEBUG)
+        target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 
-add_test(NAME test01 COMMAND test01)
+        if(SANITIZE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+            target_compile_options(${name} PRIVATE -fsanitize=address,undefined)
+            target_link_options(${name} PRIVATE -fsanitize=address,undefined)
+        endif()
+
+        add_test(NAME ${name} COMMAND ${name})
+    endfunction()
+
+    add_cgnrc_test(test01)
+
+    add_executable(test_header_self_contained header_self_contained.c)
+    target_include_directories(test_header_self_contained PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    target_compile_features(test_header_self_contained PRIVATE c_std_11)
+    target_compile_options(test_header_self_contained PRIVATE
+        -Wall -Wextra -Werror -UNDEBUG
+    )
+    add_test(NAME test_header_self_contained COMMAND test_header_self_contained)
+
+endif()
