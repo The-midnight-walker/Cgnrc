@@ -1,7 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0
-#
-# vim: set ts=8 sw=8 noet tw=80 cc=80 fo+=t :
-
 if(BUILD_TESTING)
     function(add_cgnrc_test name)
         if(BUILD_LIB_A)
@@ -26,6 +22,11 @@ if(BUILD_TESTING)
         target_compile_features(${name} PRIVATE c_std_11)
         target_compile_definitions(${name} PRIVATE _POSIX_C_SOURCE=200809L DEBUG)
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+
+        if(ENABLE_COVERAGE AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(${name} PRIVATE --coverage)
+            target_link_options(${name} PRIVATE --coverage)
+        endif()
 
         if(SANITIZE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_compile_options(${name} PRIVATE -fsanitize=address,undefined)
