@@ -23,7 +23,7 @@ if(BUILD_TESTING)
         target_compile_definitions(${name} PRIVATE _POSIX_C_SOURCE=200809L DEBUG)
         target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 
-        if(ENABLE_COVERAGE AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        if(COVERAGE AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
             target_compile_options(${name} PRIVATE --coverage)
             target_link_options(${name} PRIVATE --coverage)
         endif()

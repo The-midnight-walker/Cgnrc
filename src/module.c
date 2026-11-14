@@ -1361,12 +1361,12 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
         curr = curr->parent;
     }
 
-#define PRINT_USAGE(...)                                                      \
+#define PRINT_USAGE(...)                                                       \
     do {                                                                       \
         if (stream == stderr)                                                  \
-            pr_red(stream, __VA_ARGS__);                                      \
+            pr_red(stream, __VA_ARGS__);                                       \
         else                                                                   \
-            pr_yellow(stream, __VA_ARGS__);                                   \
+            pr_yellow(stream, __VA_ARGS__);                                    \
     } while (0)
 
     PRINT_USAGE("Usage: %s", name);

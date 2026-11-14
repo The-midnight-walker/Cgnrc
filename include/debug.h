@@ -348,7 +348,7 @@ int print_colored_log(const char *filepath);
 #define LOG_META_FMT " [ %s:%s:%d ]\n"
 #define LOG_META_FMT_COLOR COLOR_META_FMT " [ %s:%s:%d ]\n" RESET
 #define LOG_META_ARGS                                                          \
-    , __func__, (strncmp(__FILE__, "./", 2) == 0 ? &__FILE__[2] : __FILE__), \
+    , __func__, (strncmp(__FILE__, "./", 2) == 0 ? &__FILE__[2] : __FILE__),   \
         __LINE__
 
 #else
