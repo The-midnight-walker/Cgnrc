@@ -2,7 +2,7 @@
 // vim: set ts=8 sw=8 noet tw=80 cc=80 fo+=t :
 
 /**
- * @file      modules.c
+ * @file      module.c
  * @author    midnight walker
  * @brief     Hierarchical CLI module registry, argument matching and handler
  *            dispatch.

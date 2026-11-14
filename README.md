@@ -10,8 +10,9 @@ completion, script execution, and logging.
 - Linux or another POSIX-like system
 - CMake 3.14 or newer
 - A C11 compiler and pthreads
-- Optional: `clang-format`, `clang-tidy`, `cppcheck`, `flawfinder`, Doxygen,
-  lcov, and Valgrind for the corresponding helper targets
+- Required for configuration and installation: Doxygen
+- Optional: `clang-format`, `clang-tidy`, `cppcheck`, `flawfinder`, lcov, and
+    Valgrind for the corresponding helper targets
 
 ## Build and test
 
@@ -25,8 +26,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 Install with a Release build using `cmake --build build --target install`.
-Libraries, headers, and CMake package files are placed under `build/cgnrc/`;
-libraries are stripped during installation.
+Libraries, headers, generated HTML documentation, and CMake package files are
+placed under `build/cgnrc/`; libraries are stripped during installation.
+The documentation is generated automatically by the install target, or can be
+generated separately with `cmake --build build --target doc`.
 
 Run static and dynamic analysis with `cmake --build build --target sa` and
 `cmake --build build --target da`. Coverage reports are generated under

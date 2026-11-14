@@ -24,15 +24,35 @@ endif()
 # =============
 # DOCUMENTATION
 # =============
-find_package(Doxygen)
+find_package(Doxygen REQUIRED)
 
-if(DOXYGEN_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile")
-    add_custom_target(doc
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Generating documentation with Doxygen..."
-        VERBATIM
-    )
-else()
-    message(STATUS "Doxygen or Doxyfile not found. Target 'doc' unavailable.")
-endif()
+set(CGNRC_DOC_OUTPUT_DIR "${CMAKE_BINARY_DIR}/docs")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/Doxyfile"
+    "${CMAKE_BINARY_DIR}/Doxyfile"
+    @ONLY
+)
+
+# Keep the checked-in Doxyfile usable as a plain Doxygen config. Force the
+# build-specific input and output paths in the generated copy, regardless of
+# whether the source Doxyfile was regenerated or locally customized.
+file(APPEND "${CMAKE_BINARY_DIR}/Doxyfile"
+    "\n# CMake-managed project settings\n"
+    "PROJECT_NAME = \"cgnrc\"\n"
+    "PROJECT_NUMBER = \"${CGNRC_VERSION_FULL}\"\n"
+    "OUTPUT_DIRECTORY = \"${CGNRC_DOC_OUTPUT_DIR}\"\n"
+    "INPUT = \"${CMAKE_SOURCE_DIR}/include\" \"${CMAKE_SOURCE_DIR}/src\" \"${CMAKE_SOURCE_DIR}/README.md\"\n"
+    "RECURSIVE = YES\n"
+    "USE_MDFILE_AS_MAINPAGE = \"${CMAKE_SOURCE_DIR}/README.md\"\n"
+    "OPTIMIZE_OUTPUT_FOR_C = YES\n"
+    "GENERATE_LATEX = NO\n"
+    "HAVE_DOT = NO\n"
+)
+
+add_custom_target(doc
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${CGNRC_DOC_OUTPUT_DIR}"
+    COMMAND "${DOXYGEN_EXECUTABLE}" "${CMAKE_BINARY_DIR}/Doxyfile"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Generating documentation with Doxygen..."
+    VERBATIM
+)

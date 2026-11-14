@@ -113,6 +113,28 @@ install(CODE "
     message(STATUS \"Checking Release configuration and stripping cgnrc libraries before install\")
 ")
 
+# Generate the documentation as part of installation, even when the caller
+# invokes only the install target and has not built the optional doc target.
+install(CODE "
+    file(REMOVE_RECURSE \"${CGNRC_DOC_OUTPUT_DIR}\")
+    file(REMOVE_RECURSE
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}\"
+    )
+    execute_process(
+        COMMAND \"${DOXYGEN_EXECUTABLE}\" \"${CMAKE_BINARY_DIR}/Doxyfile\"
+        WORKING_DIRECTORY \"${CMAKE_SOURCE_DIR}\"
+        RESULT_VARIABLE _doxygen_result
+        ERROR_VARIABLE _doxygen_error
+    )
+    if(NOT _doxygen_result EQUAL 0)
+        message(FATAL_ERROR \"Doxygen documentation generation failed: \${_doxygen_error}\")
+    endif()
+    if(NOT EXISTS \"${CGNRC_DOC_OUTPUT_DIR}/html/index.html\")
+        message(FATAL_ERROR \"Doxygen completed without creating ${CGNRC_DOC_OUTPUT_DIR}/html/index.html\")
+    endif()
+    message(STATUS \"Generated cgnrc documentation\")
+")
+
 # Remove directories from the previous package layout so reinstallations leave
 # only the current include/cgnrc and lib tree in the private install prefix.
 install(CODE "
@@ -158,6 +180,9 @@ install(TARGETS ${TARGETS_LIBS}
 install(DIRECTORY include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/cgnrc"
     FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY "${CGNRC_DOC_OUTPUT_DIR}/html/"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
 install(FILES "${CGNRC_GENERATED_INCLUDE_DIR}/cgnrc/version.h"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/cgnrc"
