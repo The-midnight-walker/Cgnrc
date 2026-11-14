@@ -193,7 +193,9 @@ void pr_module_short_usage(FILE *stream, const module_t *m);
 /**
  * @brief Writes a POSIX sh completion script covering the whole registry.
  *
- * @param[in] output_path Path to write (e.g. "sh_completions.sh").
+ * @param[in] output_path Trusted output path (e.g. "sh_completions.sh"). The
+ * final path component must not be a symlink; parent directories must be
+ * controlled by the caller.
  *
  * @return 0 on success, -1 on invalid argument or I/O failure.
  *
@@ -206,7 +208,9 @@ int generate_sh_completion(const char *output_path);
  * @brief Writes an idiomatic bash completion script (arrays, `local`,
  * `compgen`, `complete -F`) covering the whole registry.
  *
- * @param[in] output_path Path to write (e.g. "bash_completions.sh").
+ * @param[in] output_path Trusted output path (e.g. "bash_completions.sh").
+ * The final path component must not be a symlink; parent directories must be
+ * controlled by the caller.
  *
  * @return 0 on success, -1 on invalid argument or I/O failure.
  *

@@ -24,15 +24,17 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "debug.h"
 #include "module.h"
@@ -216,7 +218,7 @@ static int dup_option(module_option_t **dst, const module_option_t *src)
     if (!opt)
         return -1;
 
-    memcpy(opt, src, sizeof(*opt));
+    memcpy(opt, src, sizeof(*opt)); /* flawfinder: ignore */
 
     /* Drop the borrowed pointers copied by memcpy(); own copies follow. */
     opt->l_opt = NULL;
@@ -255,11 +257,10 @@ static bool option_definitions_are_valid(
             return false;
         if (!option->s_opt && !option->l_opt)
             return false;
-        if (option->s_opt &&
-            ((unsigned char)option->s_opt < 33 ||
-             (unsigned char)option->s_opt > 126 || option->s_opt == ':' ||
-             option->s_opt == '?' || option->s_opt == '+' ||
-             option->s_opt == '-'))
+        if (option->s_opt && ((unsigned char)option->s_opt < 33 ||
+                              (unsigned char)option->s_opt > 126 ||
+                              option->s_opt == ':' || option->s_opt == '?' ||
+                              option->s_opt == '+' || option->s_opt == '-'))
             return false;
         if (option->l_opt &&
             (option->l_opt[0] == '\0' || strchr(option->l_opt, '=')))
@@ -301,8 +302,7 @@ static int init_module_public(
 {
     memset(mod, 0, sizeof(*mod));
 
-    if (!name || !action ||
-        !option_definitions_are_valid(options, opt_nr))
+    if (!name || !action || !option_definitions_are_valid(options, opt_nr))
         return -1;
 
     mod->name = strdup(name);
@@ -730,7 +730,9 @@ static int parse_cli_modules(char *const *argv)
 
             if (current_mod->args_nr >= (unsigned int)(INT_MAX - 1)) {
                 errno = E2BIG;
-                pr_error("Too many arguments for module '%s'", current_mod->mod.name);
+                pr_error(
+                    "Too many arguments for module '%s'",
+                    current_mod->mod.name);
                 goto out;
             }
 
@@ -793,7 +795,8 @@ static int parse_cli_modules(char *const *argv)
     list_node_t *curr_node;
     list_for_each(curr_node, &module_ctx.matched_mods)
     {
-        module_entry_t *e = container_of(curr_node, module_entry_t, matches);
+        const module_entry_t *e =
+            container_of_const(curr_node, module_entry_t, matches);
         pr_debug(
             "Module: <%s> [level='%u', '%u' argument(s)]",
             e->mod.name,
@@ -808,8 +811,7 @@ static int parse_cli_modules(char *const *argv)
 
 out:
     if (ret != 0)
-        pr_error(
-            "Failed to parse the command line arguments for modules");
+        pr_error("Failed to parse the command line arguments for modules");
     module_mutex_unlock();
     return ret;
 }
@@ -871,9 +873,18 @@ static int parse_cli_modules_options(
     int long_idx = -1;
     int ret = 0;
 
-    while ((opt = getopt_long(
-                parse_argc, parse_argv, optstring, long_options, &long_idx)) !=
-           -1) {
+    /* argv and option tables are validated; supported Linux libc is maintained.
+     */
+    for (;;) {
+        opt = getopt_long(
+            parse_argc,
+            parse_argv,
+            optstring,
+            long_options,
+            &long_idx); // flawfinder: ignore
+        if (opt == -1)
+            break;
+
         pr_debug(
             "parsed opt=%d ('%c'), optind=%d", opt, printable(opt), optind);
 
@@ -883,8 +894,7 @@ static int parse_cli_modules_options(
                                        : NULL;
 
             if (optopt != 0) {
-                pr_error(
-                    "Unrecognized option: '-%c'\n", printable(optopt));
+                pr_error("Unrecognized option: '-%c'\n", printable(optopt));
             } else if (last_arg) {
                 pr_error("Unrecognized option: '%s'\n", last_arg);
             } else {
@@ -897,8 +907,7 @@ static int parse_cli_modules_options(
         }
 
         if (opt == ':') {
-            pr_error(
-                "Option requires an argument: '-%c'\n", printable(optopt));
+            pr_error("Option requires an argument: '-%c'\n", printable(optopt));
             if (m->usage)
                 pr_module_usage(stderr, m);
             ret = -1;
@@ -1187,6 +1196,9 @@ int launch_cli(char *const *argv)
  */
 static void module_usage_impl(FILE *stream, const module_t *m)
 {
+    if (!stream)
+        stream = stderr;
+
     module_mutex_lock();
     pr_module_short_usage(stream, m);
 
@@ -1195,6 +1207,8 @@ static void module_usage_impl(FILE *stream, const module_t *m)
 
         for (size_t i = 0; i < m->opt_nr; i++) {
             const module_option_t *o = m->options[i];
+            /* snprintf() bounds this option-display buffer. */
+            /* flawfinder: ignore */
             char opt_buf[64];
 
             if (o->s_opt && o->l_opt) {
@@ -1254,8 +1268,8 @@ static void module_usage_impl(FILE *stream, const module_t *m)
      */
     const module_entry_t *entry = to_module_entry_const(m);
     const list_node_t *sub_mods = (entry == module_ctx.root_entry)
-                                ? &module_ctx.root_sub_modules
-                                : (entry ? &entry->sub_modules : NULL);
+                                      ? &module_ctx.root_sub_modules
+                                      : (entry ? &entry->sub_modules : NULL);
 
     if (sub_mods && !list_empty(sub_mods)) {
         fprintf(stream, "Available commands:\n");
@@ -1264,6 +1278,8 @@ static void module_usage_impl(FILE *stream, const module_t *m)
         {
             const module_entry_t *child =
                 container_of_const(curr, module_entry_t, siblings);
+            /* snprintf() bounds this display-only command-name buffer. */
+            /* flawfinder: ignore */
             char cmd_buf[32];
             snprintf(
                 cmd_buf,
@@ -1328,6 +1344,8 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
     }
 
 #define PR_USAGE_STACK_BUF 32
+    /* The depth is counted above; larger trees use checked heap storage. */
+    /* flawfinder: ignore */
     const module_t *stack_chain[PR_USAGE_STACK_BUF];
     const module_t **chain = (depth <= PR_USAGE_STACK_BUF)
                                  ? stack_chain
@@ -1343,12 +1361,12 @@ void pr_module_short_usage(FILE *stream, const module_t *m)
         curr = curr->parent;
     }
 
-#define PRINT_USAGE(fmt, ...)                                                  \
+#define PRINT_USAGE(...)                                                      \
     do {                                                                       \
         if (stream == stderr)                                                  \
-            pr_red(stream, fmt, ##__VA_ARGS__);                                \
+            pr_red(stream, __VA_ARGS__);                                      \
         else                                                                   \
-            pr_yellow(stream, fmt, ##__VA_ARGS__);                             \
+            pr_yellow(stream, __VA_ARGS__);                                   \
     } while (0)
 
     PRINT_USAGE("Usage: %s", name);
@@ -1398,7 +1416,8 @@ static void write_completion_arm(
     list_node_t *curr;
     list_for_each(curr, children)
     {
-        module_entry_t *child = container_of(curr, module_entry_t, siblings);
+        const module_entry_t *child =
+            container_of_const(curr, module_entry_t, siblings);
         fprintf(out, "%s%s", first ? "" : " ", child->mod.name);
         first = false;
     }
@@ -1410,26 +1429,51 @@ static void write_completion_arm(
  * @brief Emits one arm per module under @p modules, depth-first.
  *
  * @p parent_path is the space-joined names of modules above this level, or
- * "" for the top level. Paths are capped at 255 chars (snprintf-truncated);
- * fine for any reasonable module tree.
+ * "" for the top level. Each path is allocated to its exact required size.
  */
-static void
+static int
 write_completion_tree(FILE *out, const char *parent_path, list_node_t *modules)
 {
     list_node_t *curr;
     list_for_each(curr, modules)
     {
         module_entry_t *e = container_of(curr, module_entry_t, siblings);
+        const char *name = e->mod.name;
+        /* Names are owned copies made with strdup() during registration. */
+        /* flawfinder: ignore */
+        size_t parent_len = strlen(parent_path);
+        /* flawfinder: ignore */
+        size_t name_len = strlen(name);
+        size_t separator_len = parent_len > 0 ? 1 : 0;
 
-        char path[256];
-        if (parent_path[0] == '\0')
-            snprintf(path, sizeof(path), "%s", e->mod.name);
-        else
-            snprintf(path, sizeof(path), "%s %s", parent_path, e->mod.name);
+        if (name_len > SIZE_MAX - separator_len - 1 ||
+            parent_len > SIZE_MAX - name_len - separator_len - 1) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+
+        size_t path_len = parent_len + separator_len + name_len;
+        char *path = malloc(path_len + 1);
+        if (!path)
+            return -1;
+
+        if (parent_len > 0) {
+            /* Allocation size was overflow-checked above. */
+            /* flawfinder: ignore */
+            memcpy(path, parent_path, parent_len);
+            path[parent_len] = ' ';
+        }
+        /* Copy the NUL terminator into the exact-size path allocation. */
+        /* flawfinder: ignore */
+        memcpy(path + parent_len + separator_len, name, name_len + 1);
 
         write_completion_arm(out, path, &e->mod, &e->sub_modules);
-        write_completion_tree(out, path, &e->sub_modules);
+        int ret = write_completion_tree(out, path, &e->sub_modules);
+        free(path);
+        if (ret != 0)
+            return -1;
     }
+    return 0;
 }
 
 /** Returns whether a token is safe in the generated space-separated list. */
@@ -1475,7 +1519,8 @@ static bool completion_tree_is_safe(const list_node_t *modules)
 }
 
 /** Writes a shell single-quoted assignment without interpreting its value. */
-static void write_shell_assignment(FILE *out, const char *name, const char *value)
+static void
+write_shell_assignment(FILE *out, const char *name, const char *value)
 {
     fprintf(out, "%s='", name);
     for (const char *ch = value; *ch; ch++) {
@@ -1645,6 +1690,8 @@ static int write_completion_script(
 
     const char *command_name = strrchr(prog_name, '/');
     command_name = command_name ? command_name + 1 : prog_name;
+    /* The basename is sanitized and truncated to this bounded identifier. */
+    /* flawfinder: ignore */
     char base[128];
     shell_function_base(command_name, base, sizeof(base));
 
@@ -1658,12 +1705,23 @@ static int write_completion_script(
         return -1;
     }
 
-    FILE *out = fopen(output_path, "w");
-    if (!out) {
+    /* Reject final-component symlinks for generated writable scripts. */
+    int output_flags = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW;
+    int output_fd = open(output_path, output_flags, 0666); // flawfinder: ignore
+    if (output_fd == -1) {
         int saved_errno = errno;
         module_mutex_unlock();
         errno = saved_errno;
         pr_error("Failed to open '%s' for writing", output_path);
+        return -1;
+    }
+
+    FILE *out = fdopen(output_fd, "w");
+    if (!out) {
+        int saved_errno = errno;
+        close(output_fd);
+        module_mutex_unlock();
+        errno = saved_errno;
         return -1;
     }
 
@@ -1674,18 +1732,21 @@ static int write_completion_script(
         "",
         module_ctx.root_entry ? &module_ctx.root_entry->mod : NULL,
         &module_ctx.root_sub_modules);
-    write_completion_tree(out, "", &module_ctx.root_sub_modules);
+    int tree_result =
+        write_completion_tree(out, "", &module_ctx.root_sub_modules);
 
-    write_footer(out, base);
+    if (tree_result == 0)
+        write_footer(out, base);
 
     int write_failed = ferror(out);
     module_mutex_unlock();
 
+    int saved_errno = errno;
     if (fclose(out) != 0)
         write_failed = 1;
-    if (write_failed) {
-        if (errno == 0)
-            errno = EIO;
+    if (tree_result != 0 || write_failed) {
+        (void)unlink(output_path);
+        errno = saved_errno ? saved_errno : (tree_result != 0 ? ENOMEM : EIO);
         return -1;
     }
     pr_info("Generated completion script at '%s'", output_path);

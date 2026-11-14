@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-//
 // vim: set ts=8 sw=8 noet tw=80 cc=80 fo+=t :
 
 /**
@@ -96,9 +95,12 @@ static int execve_shell_script_impl(const char *pathname, char *const argv[])
     int exec_errno = 0;
     size_t received = 0;
     while (received < sizeof(exec_errno)) {
+        /* The read length is always bounded by the remaining object size. */
+        size_t remaining = sizeof(exec_errno) - received;
         ssize_t count = read(
-            error_pipe[0], (char *)&exec_errno + received,
-            sizeof(exec_errno) - received);
+            error_pipe[0],
+            (char *)&exec_errno + received,
+            remaining); // flawfinder: ignore
         if (count > 0) {
             received += (size_t)count;
         } else if (count == 0) {
@@ -133,8 +135,7 @@ static int execve_shell_script_impl(const char *pathname, char *const argv[])
         return -1;
     }
 
-    int ret = WIFEXITED(status) ? WEXITSTATUS(status)
-                                : 128 + WTERMSIG(status);
+    int ret = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     pr_debug("execute shell script end; ret=%d", ret);
     return ret;
 }

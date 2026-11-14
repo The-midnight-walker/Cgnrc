@@ -88,7 +88,8 @@ static inline void list_del(list_node_t *node)
     ((type *)(void *)((uintptr_t)(ptr) - offsetof(type, member)))
 
 /**
- * @brief Casts a const member pointer back to its enclosing container structure.
+ * @brief Casts a const member pointer back to its enclosing container
+ * structure.
  *
  * @param ptr    Pointer to the structure member.
  * @param type   Data type of the container structure.

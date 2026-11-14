@@ -247,7 +247,8 @@ struct log_ctx {
  * synchronization ensuring only the first initialization call succeeds.
  *
  * @param[in] cli_log_mask      Initial level mask for console output.
- * @param[in] log_file_pathname Log file path, or NULL/"" to disable the file.
+ * @param[in] log_file_pathname Trusted log file path, or NULL/"" to disable
+ * the file. The final path component must not be a symlink.
  * @param[in] flags             Extra open(2) flags.
  * @param[in] perms             File permissions used when the file is created.
  * @param[in] file_log_mask     Initial level mask for file output.
@@ -312,6 +313,7 @@ int set_file_log_mask(const unsigned int mask);
  *
  * The message is truncated to LOG_MSG_BUF_SIZE - 1 bytes and prefixed with a
  * timestamp when LOG_TIMESTAMP is defined. A newline is always appended.
+ * The format string must be trusted; do not pass an untrusted string as fmt.
  *
  * @param[in] fmt printf-style format string. Must not be NULL.
  *
@@ -330,7 +332,8 @@ int log_write(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
  * and is sent to that level's stream. Colors are emitted only when
  * LOG_TTY_COLOR is defined and stdout is a terminal.
  *
- * @param[in] filepath Path of the log file to read.
+ * @param[in] filepath Trusted path of the log file to read. The file is opened
+ * read-only; symlinks are followed intentionally.
  *
  * @return 0 on success, -1 on error (invalid path or fopen() failure).
  */
@@ -345,7 +348,7 @@ int print_colored_log(const char *filepath);
 #define LOG_META_FMT " [ %s:%s:%d ]\n"
 #define LOG_META_FMT_COLOR COLOR_META_FMT " [ %s:%s:%d ]\n" RESET
 #define LOG_META_ARGS                                                          \
-    , __func__, (strncmp(__FILE__, "./", 2) == 0 ? (__FILE__ + 2) : __FILE__), \
+    , __func__, (strncmp(__FILE__, "./", 2) == 0 ? &__FILE__[2] : __FILE__), \
         __LINE__
 
 #else
@@ -369,7 +372,7 @@ int print_colored_log(const char *filepath);
                                                                    : stdout;   \
         fprintf(                                                               \
             log_cli_stream,                                                    \
-            "%s[ %s ] " RESET COLOR_PRFX_FMT prfx_fmt RESET,                  \
+            "%s[ %s ] " RESET COLOR_PRFX_FMT prfx_fmt RESET,                   \
             LOG_LEVELS[level_index].tty_color,                                 \
             LOG_LEVELS[level_index].status);                                   \
         fprintf(log_cli_stream, __VA_ARGS__);                                  \
@@ -401,8 +404,9 @@ int print_colored_log(const char *filepath);
 #define LOG_FILE(level_index, ...)                                             \
     do {                                                                       \
         char _log_file_msg[LOG_MSG_BUF_SIZE];                                  \
-        int _msg_w = snprintf(_log_file_msg, sizeof(_log_file_msg), __VA_ARGS__); \
-        if (_msg_w > 0 && (size_t)_msg_w < sizeof(_log_file_msg) &&             \
+        int _msg_w =                                                           \
+            snprintf(_log_file_msg, sizeof(_log_file_msg), __VA_ARGS__);       \
+        if (_msg_w > 0 && (size_t)_msg_w < sizeof(_log_file_msg) &&            \
             _log_file_msg[_msg_w - 1] == '\n')                                 \
             _log_file_msg[_msg_w - 1] = '\0';                                  \
         log_write(                                                             \
@@ -420,12 +424,11 @@ int print_colored_log(const char *filepath);
         unsigned int _pr_file_mask = get_file_log_mask();                      \
         if ((_pr_cli_mask | _pr_file_mask) & (bit)) {                          \
             char _pr_message[LOG_MSG_BUF_SIZE];                                \
-            (void)snprintf(                                                    \
-                _pr_message, sizeof(_pr_message), __VA_ARGS__);                \
+            (void)snprintf(_pr_message, sizeof(_pr_message), __VA_ARGS__);     \
             if (_pr_cli_mask & (bit))                                          \
-                LOG_CLI(idx, "%s", _pr_message);                              \
+                LOG_CLI(idx, "%s", _pr_message);                               \
             if (_pr_file_mask & (bit))                                         \
-                LOG_FILE(idx, "%s", _pr_message);                             \
+                LOG_FILE(idx, "%s", _pr_message);                              \
         }                                                                      \
     } while (0)
 
@@ -435,9 +438,9 @@ int print_colored_log(const char *filepath);
  * @{
  */
 #define pr_fatal(...) PR_LEVEL(IDX_FATAL, LOG_LEVEL_FATAL, __VA_ARGS__)
-#define pr_warn(...)  PR_LEVEL(IDX_WARN, LOG_LEVEL_WARN, __VA_ARGS__)
+#define pr_warn(...) PR_LEVEL(IDX_WARN, LOG_LEVEL_WARN, __VA_ARGS__)
 #define pr_error(...) PR_LEVEL(IDX_ERROR, LOG_LEVEL_ERROR, __VA_ARGS__)
-#define pr_info(...)  PR_LEVEL(IDX_INFO, LOG_LEVEL_INFO, __VA_ARGS__)
+#define pr_info(...) PR_LEVEL(IDX_INFO, LOG_LEVEL_INFO, __VA_ARGS__)
 #define pr_debug(...) PR_LEVEL(IDX_DEBUG, LOG_LEVEL_DEBUG, __VA_ARGS__)
 /** @} */
 

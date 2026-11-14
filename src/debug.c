@@ -136,9 +136,11 @@ int init_logging_ctx(
             return LOG_ESYS;
         }
 
-        int open_flags = O_WRONLY | O_CREAT | O_CLOEXEC | flags;
+        /* Do not follow a final-component symlink supplied as the log path. */
+        int open_flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | flags;
 
-        ctx.log_fd = open(ctx.log_file_pathname, open_flags, perms);
+        ctx.log_fd = open(
+            ctx.log_file_pathname, open_flags, perms); /* flawfinder: ignore */
 
         if (ctx.log_fd == -1) {
             int saved_errno = errno;
@@ -215,6 +217,8 @@ int log_write(const char *fmt, ...)
 
     /* Optional timestamp */
 #ifdef LOG_TIMESTAMP
+    /* Fixed-size buffers are checked by strftime() before use. */
+    /* flawfinder: ignore */
     char time_buf[32];
     time_t now = time(NULL);
     struct tm tm_info;
@@ -232,11 +236,15 @@ int log_write(const char *fmt, ...)
 #endif
 
     /* Format the user message (silently truncated to the buffer size) */
+    /* vsnprintf() always terminates this buffer and its result is clamped. */
+    /* flawfinder: ignore */
     char msg_buf[LOG_MSG_BUF_SIZE];
     va_list args;
 
+    /* The public API requires a trusted printf-style format string. */
     va_start(args, fmt);
-    int msg_len = vsnprintf(msg_buf, sizeof(msg_buf), fmt, args);
+    int msg_len =
+        vsnprintf(msg_buf, sizeof(msg_buf), fmt, args); /* flawfinder: ignore */
     va_end(args);
 
     if (msg_len < 0) {
@@ -253,6 +261,8 @@ int log_write(const char *fmt, ...)
     }
 
     /* Assemble the final line */
+    /* snprintf() is checked below before the buffer is written. */
+    /* flawfinder: ignore */
     char full_line[LOG_LINE_BUF_SIZE];
     int line_len;
 
@@ -295,7 +305,7 @@ int print_colored_log(const char *filepath)
         return -1;
     }
 
-    FILE *fp = fopen(filepath, "r");
+    FILE *fp = fopen(filepath, "r"); /* flawfinder: ignore */
     if (!fp) {
         perror("fopen log_file");
         return -1;
@@ -328,7 +338,9 @@ int print_colored_log(const char *filepath)
 #ifdef LOG_TTY_COLOR
         if (use_color) {
             /* Colorized output on the level's stream */
-            fprintf(target_stream, "%s%s" RESET, color, line);
+            fputs(color, target_stream);
+            fputs(line, target_stream);
+            fputs(RESET, target_stream);
         } else {
             /* Output to a pipe or file: no ANSI codes */
             fputs(line, target_stream);
