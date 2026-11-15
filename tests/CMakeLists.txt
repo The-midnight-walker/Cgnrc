@@ -16,7 +16,7 @@ if(BUILD_TESTING)
         endif()
 
         target_include_directories(${name} PRIVATE
-            ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/include/cgnrc
         )
 
         target_compile_features(${name} PRIVATE c_std_11)
@@ -40,7 +40,7 @@ if(BUILD_TESTING)
 
     add_executable(test_header_self_contained header_self_contained.c)
     target_include_directories(test_header_self_contained PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/include/cgnrc
     )
     target_compile_features(test_header_self_contained PRIVATE c_std_11)
     target_compile_options(test_header_self_contained PRIVATE
