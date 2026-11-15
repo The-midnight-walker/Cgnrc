@@ -13,8 +13,8 @@
  * @copyright GNU General Public License v2.0
  */
 
-#ifndef INCLUDE_DEBUG_H
-#define INCLUDE_DEBUG_H
+#ifndef INCLUDE_CGNRC_DEBUG_H
+#define INCLUDE_CGNRC_DEBUG_H
 
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
@@ -444,4 +444,4 @@ int print_colored_log(const char *filepath);
 #define pr_debug(...) PR_LEVEL(IDX_DEBUG, LOG_LEVEL_DEBUG, __VA_ARGS__)
 /** @} */
 
-#endif /* INCLUDE_DEBUG_H */
+#endif /* INCLUDE_CGNRC_DEBUG_H */

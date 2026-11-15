@@ -11,8 +11,8 @@
  * @copyright GNU General Public License v2.0
  */
 
-#ifndef INCLUDE_MODULE_H
-#define INCLUDE_MODULE_H
+#ifndef INCLUDE_CGNRC_MODULE_H
+#define INCLUDE_CGNRC_MODULE_H
 
 #include <getopt.h>
 #include <stdbool.h>
@@ -231,4 +231,4 @@ void module_set_prog_name(const char *prog_name);
  */
 const char *module_get_prog_name(void);
 
-#endif /* INCLUDE_MODULE_H */
+#endif /* INCLUDE_CGNRC_MODULE_H */

@@ -13,8 +13,8 @@
  * @copyright GNU General Public License v2.0
  */
 
-#ifndef INCLUDE_LISTS_H
-#define INCLUDE_LISTS_H
+#ifndef INCLUDE_CGNRC_LISTS_H
+#define INCLUDE_CGNRC_LISTS_H
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -120,4 +120,4 @@ static inline bool list_empty(const list_node_t *head)
     return head->next == head;
 }
 
-#endif /* INCLUDE_LISTS_H */
+#endif /* INCLUDE_CGNRC_LISTS_H */
