@@ -98,7 +98,7 @@ foreach(lib ${TARGETS_LIBS})
     )
 
     target_include_directories(${lib} PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include/cgnrc>
         $<BUILD_INTERFACE:${CGNRC_GENERATED_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
