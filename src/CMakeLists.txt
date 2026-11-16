@@ -9,12 +9,13 @@ set(TARGETS_LIBS "")
 
 if(BUILD_LIB_SO)
     add_library(cgnrc_shared SHARED ${SOURCE_FILES})
-    set_target_properties(cgnrc_shared PROPERTIES OUTPUT_NAME cgnrc_shared)
+    set_target_properties(cgnrc_shared PROPERTIES OUTPUT_NAME cgnrc)
     list(APPEND TARGETS_LIBS cgnrc_shared)
 endif()
 if(BUILD_LIB_A)
     add_library(cgnrc_static STATIC ${SOURCE_FILES})
-    set_target_properties(cgnrc_static PROPERTIES OUTPUT_NAME cgnrc_static)
+    set_target_properties(cgnrc_static PROPERTIES OUTPUT_NAME cgnrc)
+    add_library(cgnrc ALIAS cgnrc_static)
     list(APPEND TARGETS_LIBS cgnrc_static)
 endif()
 
@@ -35,7 +36,7 @@ set(COMMON_COMPILE_OPTIONS
     -Wcast-qual
     -Wfloat-equal
     -fno-common
-    -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.
+    -fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -98,7 +99,8 @@ foreach(lib ${TARGETS_LIBS})
     )
 
     target_include_directories(${lib} PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include/cgnrc>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/cgnrc>
         $<BUILD_INTERFACE:${CGNRC_GENERATED_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )

@@ -34,8 +34,10 @@ set(CGNRC_VERSION_FULL "${_version}${_version_extra}")
 project(cgnrc VERSION "${_version}" LANGUAGES C)
 
 # Keep installation local to the build tree; this project installs no programs.
-set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/cgnrc" CACHE PATH
-    "Private cgnrc install prefix" FORCE)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/cgnrc" CACHE PATH
+        "Private cgnrc install prefix" FORCE)
+endif()
 
 # ===================
 # CMAKE CONFIGURATION
@@ -52,7 +54,7 @@ set(BUILD_LIB "cgnrc" CACHE STRING "Library name")
 option(BUILD_LIB_SO "Build shared library" OFF)
 option(BUILD_LIB_A  "Build static library" ON)
 
-if(NOT CMAKE_BUILD_TYPE)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose Debug or Release" FORCE)
 endif()
 
@@ -83,13 +85,15 @@ configure_file(
 )
 
 add_subdirectory(src)
-add_subdirectory(tests)
 
-# =======
-# INSTALL
-# =======
-include(cmake/miscs.cmake)
-include(cmake/analyzers.cmake)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    add_subdirectory(tests)
+
+    # =======
+    # INSTALL
+    # =======
+    include(cmake/miscs.cmake)
+    include(cmake/analyzers.cmake)
 
 find_program(CGNRC_STRIP_EXECUTABLE NAMES strip)
 if(NOT CGNRC_STRIP_EXECUTABLE)
@@ -208,3 +212,4 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/cgnrcConfigVersion.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cgnrc"
 )
+endif()
